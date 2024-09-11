@@ -5,7 +5,7 @@ on:
     types: [trigger-workflow]
 jobs:
   trigger:
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Trigger Workflow in Another Repository
