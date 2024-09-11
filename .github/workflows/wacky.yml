@@ -5,7 +5,7 @@ on:
     types: [trigger-workflow]
 jobs:
   trigger:
-    runs-on: ${{ matrix.os }}
+    runs-on: self-hosted
 
     steps:
       - name: Trigger Workflow in Another Repository
