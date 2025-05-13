@@ -562,13 +562,34 @@ void N64Recomp::CGenerator::emit_comment(const std::string& comment) const {
     fmt::print(output_file, "// {}\n", comment);
 }
 
-void N64Recomp::CGenerator::process_binary_op(const BinaryOp& op, const InstructionContext& ctx) const {
+void N64Recomp::CGenerator::process_binary_op(const Context& context, const BinaryOp& op, const InstructionContext& ctx) const {
     // Thread local variables to prevent allocations when possible.
     // TODO these thread locals probably don't actually help right now, so figure out a better way to prevent allocations.
     thread_local std::string output{};
     thread_local std::string expression{};
     get_operand_string(op.output, UnaryOpType::None, ctx, output);
     get_binary_expr_string(op.type, op.operands, ctx, output, expression);
+    switch (op.type) {
+        case N64Recomp::BinaryOpType::LW:
+        case N64Recomp::BinaryOpType::LWU:
+        case N64Recomp::BinaryOpType::LH:
+        case N64Recomp::BinaryOpType::LHU:
+        case N64Recomp::BinaryOpType::LB:
+        case N64Recomp::BinaryOpType::LBU:
+        case N64Recomp::BinaryOpType::LDL:
+        case N64Recomp::BinaryOpType::LDR:
+        case N64Recomp::BinaryOpType::LWL:
+        case N64Recomp::BinaryOpType::LWR:
+            thread_local std::string input_a{};
+            thread_local std::string input_b{};
+            thread_local std::string func_string{};
+            thread_local std::string infix_string{};
+            get_operand_string(op.operands.operands[0], op.operands.operand_operations[0], ctx, input_a);
+            get_operand_string(op.operands.operands[1], op.operands.operand_operations[1], ctx, input_b);
+            get_notation(op.type, func_string, infix_string);
+            fmt::print(output_file, "TRACE_MEMREAD(\"{}\", {}, {}, {})\n    ", func_string, input_a, input_b, output);
+            break;
+    }
     fmt::print(output_file, "{} = {};\n", output, expression);
 }
 
@@ -582,7 +603,7 @@ void N64Recomp::CGenerator::process_unary_op(const UnaryOp& op, const Instructio
     fmt::print(output_file, "{} = {};\n", output, input);
 }
 
-void N64Recomp::CGenerator::process_store_op(const StoreOp& op, const InstructionContext& ctx) const {
+void N64Recomp::CGenerator::process_store_op(const Context& context, const StoreOp& op, const InstructionContext& ctx) const {
     // Thread local variables to prevent allocations when possible.
     // TODO these thread locals probably don't actually help right now, so figure out a better way to prevent allocations.
     thread_local std::string base_str{};
@@ -644,6 +665,10 @@ void N64Recomp::CGenerator::process_store_op(const StoreOp& op, const Instructio
             break;
         default:
             throw std::runtime_error("Unhandled store op");
+    }
+
+    if (context.trace_mode) {
+        fmt::print(output_file, "TRACE_MEMWRITE(\"{}\", {}, {}, {})\n    ", func_text, base_str, imm_str, value_input);
     }
 
     switch (syntax) {
