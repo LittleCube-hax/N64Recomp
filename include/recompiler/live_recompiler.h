@@ -98,9 +98,9 @@ namespace N64Recomp {
         LiveGenerator& operator=(LiveGenerator&& rhs) = delete;
 
         LiveGeneratorOutput finish();
-        void process_binary_op(const BinaryOp& op, const InstructionContext& ctx) const final;
+        void process_binary_op(const Context& context, const BinaryOp& op, const InstructionContext& ctx) const final;
         void process_unary_op(const UnaryOp& op, const InstructionContext& ctx) const final;
-        void process_store_op(const StoreOp& op, const InstructionContext& ctx) const final;
+        void process_store_op(const Context& context, const StoreOp& op, const InstructionContext& ctx) const final;
         void emit_function_start(const std::string& function_name, size_t func_index) const final;
         void emit_function_end() const final;
         void emit_function_call_lookup(uint32_t addr) const final;

@@ -682,7 +682,7 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
             print_indent();
         }
 
-        generator.process_binary_op(op, instruction_context);
+        generator.process_binary_op(context, op, instruction_context);
         handled = true;
     }
 
@@ -741,7 +741,7 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
             do_check_fr(generator, instruction_context, op.value_input);
         }
 
-        generator.process_store_op(op, instruction_context);
+        generator.process_store_op(context, op, instruction_context);
         handled = true;
     }
 

@@ -396,7 +396,7 @@ bool outputs_to_zero(N64Recomp::Operand output, const N64Recomp::InstructionCont
     return false;
 }
 
-void N64Recomp::LiveGenerator::process_binary_op(const BinaryOp& op, const InstructionContext& ctx) const {
+void N64Recomp::LiveGenerator::process_binary_op(const Context& context, const BinaryOp& op, const InstructionContext& ctx) const {
     // Skip instructions that output to $zero
     if (outputs_to_zero(op.output, ctx)) {
         return;
@@ -1166,7 +1166,7 @@ void N64Recomp::LiveGenerator::process_unary_op(const UnaryOp& op, const Instruc
     }
 }
 
-void N64Recomp::LiveGenerator::process_store_op(const StoreOp& op, const InstructionContext& ctx) const {
+void N64Recomp::LiveGenerator::process_store_op(const Context& context, const StoreOp& op, const InstructionContext& ctx) const {
     sljit_sw src;
     sljit_sw srcw;
     sljit_sw imm = (sljit_sw)(int16_t)ctx.imm16;
