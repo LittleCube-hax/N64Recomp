@@ -569,26 +569,28 @@ void N64Recomp::CGenerator::process_binary_op(const Context& context, const Bina
     thread_local std::string expression{};
     get_operand_string(op.output, UnaryOpType::None, ctx, output);
     get_binary_expr_string(op.type, op.operands, ctx, output, expression);
-    switch (op.type) {
-        case N64Recomp::BinaryOpType::LW:
-        case N64Recomp::BinaryOpType::LWU:
-        case N64Recomp::BinaryOpType::LH:
-        case N64Recomp::BinaryOpType::LHU:
-        case N64Recomp::BinaryOpType::LB:
-        case N64Recomp::BinaryOpType::LBU:
-        case N64Recomp::BinaryOpType::LDL:
-        case N64Recomp::BinaryOpType::LDR:
-        case N64Recomp::BinaryOpType::LWL:
-        case N64Recomp::BinaryOpType::LWR:
-            thread_local std::string input_a{};
-            thread_local std::string input_b{};
-            thread_local std::string func_string{};
-            thread_local std::string infix_string{};
-            get_operand_string(op.operands.operands[0], op.operands.operand_operations[0], ctx, input_a);
-            get_operand_string(op.operands.operands[1], op.operands.operand_operations[1], ctx, input_b);
-            get_notation(op.type, func_string, infix_string);
-            fmt::print(output_file, "TRACE_MEMREAD(\"{}\", {}, {}, {})\n    ", func_string, input_a, input_b, output);
-            break;
+    if (context.trace_mode) {
+        switch (op.type) {
+            case N64Recomp::BinaryOpType::LW:
+            case N64Recomp::BinaryOpType::LWU:
+            case N64Recomp::BinaryOpType::LH:
+            case N64Recomp::BinaryOpType::LHU:
+            case N64Recomp::BinaryOpType::LB:
+            case N64Recomp::BinaryOpType::LBU:
+            case N64Recomp::BinaryOpType::LDL:
+            case N64Recomp::BinaryOpType::LDR:
+            case N64Recomp::BinaryOpType::LWL:
+            case N64Recomp::BinaryOpType::LWR:
+                thread_local std::string input_a{};
+                thread_local std::string input_b{};
+                thread_local std::string func_string{};
+                thread_local std::string infix_string{};
+                get_operand_string(op.operands.operands[0], op.operands.operand_operations[0], ctx, input_a);
+                get_operand_string(op.operands.operands[1], op.operands.operand_operations[1], ctx, input_b);
+                get_notation(op.type, func_string, infix_string);
+                fmt::print(output_file, "TRACE_MEMREAD(\"{}\", {}, {}, {})\n    ", func_string, input_a, input_b, output);
+                break;
+        }
     }
     fmt::print(output_file, "{} = {};\n", output, expression);
 }
