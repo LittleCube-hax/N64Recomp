@@ -6,7 +6,66 @@
 #include "recompiler/context.h"
 #include "elfio/elfio.hpp"
 
-bool read_symbols(N64Recomp::Context& context, const ELFIO::elfio& elf_file, ELFIO::section* symtab_section, const N64Recomp::ElfParsingConfig& elf_config, bool dumping_context, std::unordered_map<uint16_t, std::vector<N64Recomp::DataSymbol>>& data_syms) {
+void add_mdebug_functions(N64Recomp::Context& context, const std::vector<N64Recomp::MDebugFunction>& mdebug_functions) {
+    auto exit_failure = [](const std::string& error_str) {
+        fmt::vprint(stderr, error_str, fmt::make_format_args());
+        std::exit(EXIT_FAILURE);
+    };
+
+    // Build a lookup from section name to section index.
+    std::unordered_map<std::string, size_t> section_indices_by_name{};
+    section_indices_by_name.reserve(context.sections.size());
+
+    for (size_t i = 0; i < context.sections.size(); i++) {
+        section_indices_by_name.emplace(context.sections[i].name, i);
+    }
+
+    for (const N64Recomp::MDebugFunction& cur_func_def : mdebug_functions) {
+        const auto section_find_it = section_indices_by_name.find(cur_func_def.section_name);
+        if (section_find_it == section_indices_by_name.end()) {
+            exit_failure(fmt::format("MDebug function {} specified with section {}, which doesn't exist!\n", cur_func_def.func_name, cur_func_def.section_name));
+        }
+        size_t section_index = section_find_it->second;
+
+        const auto func_find_it = context.functions_by_name.find(cur_func_def.func_name);
+        if (func_find_it != context.functions_by_name.end()) {
+            continue;
+        }
+
+        if ((cur_func_def.size & 0b11) != 0) {
+            exit_failure(fmt::format("MDebug function {} has a size that isn't divisible by 4!\n", cur_func_def.func_name));
+        }
+
+        auto& section = context.sections[section_index];
+        uint32_t section_offset = cur_func_def.vram - section.ram_addr;
+        uint32_t rom_address = section_offset + section.rom_addr;
+
+        std::vector<uint32_t> words;
+        words.resize(cur_func_def.size / 4);
+        const uint32_t* elf_words = reinterpret_cast<const uint32_t*>(context.rom.data() + context.sections[section_index].rom_addr + section_offset);
+
+        words.assign(elf_words, elf_words + words.size());
+
+        size_t function_index = context.functions.size();
+        context.functions.emplace_back(
+            cur_func_def.vram,
+            rom_address,
+            std::move(words),
+            cur_func_def.func_name,
+            uint16_t(section_index),
+            false,
+            false,
+            false
+        );
+
+        context.section_functions[section_index].push_back(function_index);
+        section.function_addrs.push_back(function_index);
+        context.functions_by_vram[cur_func_def.vram].push_back(function_index);
+        context.functions_by_name[cur_func_def.func_name] = function_index;
+    }
+}
+
+bool read_symbols(N64Recomp::Context& context, const ELFIO::elfio& elf_file, ELFIO::section* symtab_section, const N64Recomp::ElfParsingConfig& elf_config, bool dumping_context, std::unordered_map<uint16_t, std::vector<N64Recomp::DataSymbol>>& data_syms, std::vector<N64Recomp::MDebugFunction>& mdebug_functions) {
     bool found_entrypoint_func = false;
     ELFIO::symbol_section_accessor symbols{ elf_file, symtab_section };
 
@@ -192,6 +251,8 @@ bool read_symbols(N64Recomp::Context& context, const ELFIO::elfio& elf_file, ELF
         }
     }
 
+    add_mdebug_functions(context, mdebug_functions);
+
     return found_entrypoint_func;
 }
 
@@ -215,7 +276,7 @@ std::optional<size_t> get_segment(const std::vector<SegmentEntry>& segments, ELF
     return std::nullopt;
 }
 
-ELFIO::section* read_sections(N64Recomp::Context& context, const N64Recomp::ElfParsingConfig& elf_config, const ELFIO::elfio& elf_file) {
+ELFIO::section* read_sections(N64Recomp::Context& context, const N64Recomp::ElfParsingConfig& elf_config, const ELFIO::elfio& elf_file, std::vector<N64Recomp::MDebugFunction>& mdebug_functions) {
     ELFIO::section* symtab_section = nullptr;
     std::vector<SegmentEntry> segments{};
     segments.resize(elf_file.segments.size());
@@ -268,6 +329,10 @@ ELFIO::section* read_sections(N64Recomp::Context& context, const N64Recomp::ElfP
         }
     }
 
+    int mdebug_section_index = -1;
+    const char* mdebug_data;
+    uint64_t mdebug_offset;
+
     // Iterate over every section to record rom addresses and find the symbol table
     for (const auto& section : elf_file.sections) {
         auto& section_out = context.sections[section->get_index()];
@@ -277,6 +342,13 @@ ELFIO::section* read_sections(N64Recomp::Context& context, const N64Recomp::ElfP
         section_out.size = section->get_size();
         ELFIO::Elf_Word type = section->get_type();
         std::string section_name = section->get_name();
+
+        if (section_name == ".mdebug") {
+            mdebug_section_index = section->get_index();
+            mdebug_data = section->get_data();
+            mdebug_offset = section->get_offset();
+            continue;
+        }
 
         // Check if this section is the symbol table and record it if so
         if (type == ELFIO::SHT_SYMTAB) {
@@ -333,6 +405,12 @@ ELFIO::section* read_sections(N64Recomp::Context& context, const N64Recomp::ElfP
             section_out.executable = true;
         }
         section_out.name = section_name;
+    }
+
+    if (mdebug_section_index != -1) {
+        if (!N64Recomp::Context::from_mdebug_section(context, mdebug_data, mdebug_offset, mdebug_functions)) {
+            return nullptr;
+        }
     }
 
     if (symtab_section == nullptr) {
@@ -636,8 +714,10 @@ bool N64Recomp::Context::from_elf_file(const std::filesystem::path& elf_file_pat
 
     setup_context_for_elf(out, elf_file);
 
+    std::vector<N64Recomp::MDebugFunction> mdebug_functions;
+
     // Read all of the sections in the elf and look for the symbol table section
-    ELFIO::section* symtab_section = read_sections(out, elf_config, elf_file);
+    ELFIO::section* symtab_section = read_sections(out, elf_config, elf_file, mdebug_functions);
 
     // If no symbol table was found then exit
     if (symtab_section == nullptr) {
@@ -645,7 +725,7 @@ bool N64Recomp::Context::from_elf_file(const std::filesystem::path& elf_file_pat
     }
 
     // Read all of the symbols in the elf and look for the entrypoint function
-    found_entrypoint_out = read_symbols(out, elf_file, symtab_section, elf_config, for_dumping_context, data_syms_out);
+    found_entrypoint_out = read_symbols(out, elf_file, symtab_section, elf_config, for_dumping_context, data_syms_out, mdebug_functions);
 
     return true;
 }

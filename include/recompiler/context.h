@@ -37,7 +37,16 @@ namespace N64Recomp {
                 : vram(vram), rom(rom), words(std::move(words)), name(std::move(name)), section_index(section_index), ignored(ignored), reimplemented(reimplemented), stubbed(stubbed) {}
         Function() = default;
     };
-    
+
+    struct MDebugFunction {
+        std::string func_name;
+        std::string section_name;
+        uint32_t vram;
+        uint32_t size;
+
+        MDebugFunction(const std::string& func_name, std::string section_name, uint32_t vram, uint32_t size) : func_name(std::move(func_name)), section_name(std::move(section_name)), vram(vram), size(size) {}
+    };
+
     struct JumpTable {
         uint32_t vram;
         uint32_t addend_reg;
@@ -266,6 +275,7 @@ namespace N64Recomp {
 
         static bool from_symbol_file(const std::filesystem::path& symbol_file_path, std::vector<uint8_t>&& rom, Context& out, bool with_relocs);
         static bool from_elf_file(const std::filesystem::path& elf_file_path, Context& out, const ElfParsingConfig& flags, bool for_dumping_context, DataSymbolMap& data_syms_out, bool& found_entrypoint_out);
+        static bool from_mdebug_section(N64Recomp::Context& context, const char* mdebug_data, uint64_t mdebug_file_offset, std::vector<N64Recomp::MDebugFunction>& mdebug_functions);
 
         Context() = default;
 
