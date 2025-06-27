@@ -79,10 +79,6 @@ void mdebug_parse_header(MDebugHDRR& out_header, const char* mdebug_data, uint64
     for (int i = 0; i < MDEBUG_INTS_SIZE; ++i) {
         out_header.hdrr_ints[i] = BE_TO_LE_32(mdebug_data, data_offset);
     }
-
-    //~ fprintf(stderr, "magic is 0x%02X\n", out_header.magic);
-    //~ fprintf(stderr, "ilineMax is 0x%04X and 0x%04X\n", out_header.ilineMax, out_header.hdrr_ints[0]);
-    //~ fprintf(stderr, "cbSsOffset is 0x%04X and 0x%04X\n", out_header.cbSsOffset, out_header.hdrr_ints[14]);
 }
 
 void mdebug_parse_ss_strs(std::unordered_map<int32_t, std::string>& out_ss_strs, const MDebugHDRR& header, const char* mdebug_data, uint64_t mdebug_file_offset) {
@@ -98,7 +94,6 @@ void mdebug_parse_ss_strs(std::unordered_map<int32_t, std::string>& out_ss_strs,
             c = mdebug_data[header.cbSsOffset - mdebug_file_offset + str_offset];
         }
         str_offset += 1;
-        //~ fprintf(stderr, "string: %s\n", out_ss_strs[curr_iss].c_str());
     }
 }
 
@@ -120,28 +115,28 @@ bool N64Recomp::Context::from_mdebug_section(N64Recomp::Context& context, const 
 
     size_t sym_offset = header.cbSymOffset - mdebug_file_offset;
 
-    std::vector<MDebugSYMR> syms;
-
-    //~ fprintf(stderr, "isymMax: 0x%08X\n", header.isymMax);
+    std::unordered_map<std::string, MDebugSYMR> syms;
 
     for (int i = 0; i < header.isymMax; ++i) {
         MDebugSYMR sym{};
         mdebug_parse_sym(sym, context, mdebug_data, sym_offset);
 
         if (sym.st == ST_STATICPROC) {
-            syms.push_back(sym);
-
-            MDebugSYMR end_sym{};
-            mdebug_parse_sym(end_sym, context, mdebug_data, sym_offset);
-            i += 1;
-            sym.size = end_sym.value;
-
+            syms[ss_strs[sym.iss]] = sym;
+        } else if (sym.st == ST_END) {
+            if (syms.find(ss_strs[sym.iss]) == syms.end()) {
+                continue;
+            }
+            MDebugSYMR orig_sym = syms[ss_strs[sym.iss]];
+            orig_sym.size = sym.value;
             std::string sym_section = "";
 
             for (auto section : context.sections) {
-                printf("section: %s, addr: 0x%04X, size: 0x%04X\n", section.name.c_str(), section.ram_addr, section.size);
-                if (sym.value >= section.ram_addr && sym.value < section.ram_addr + section.size) {
-                    //~ printf("section: %s, addr: 0x%04X, size: 0x%04X\n", section.name.c_str(), section.ram_addr, section.size);
+                if (!section.executable) {
+                    continue;
+                }
+
+                if (orig_sym.value >= section.ram_addr && orig_sym.value < section.ram_addr + section.size) {
                     sym_section = section.name;
                     break;
                 }
@@ -152,9 +147,7 @@ bool N64Recomp::Context::from_mdebug_section(N64Recomp::Context& context, const 
                 return false;
             }
 
-            printf("name: %s, section: %s, value: 0x%04X, size: %d\n", ss_strs[sym.iss].c_str(), sym_section.c_str(), (uint32_t) sym.value, sym.size);
-
-            mdebug_functions.push_back({ss_strs[sym.iss], sym_section, static_cast<uint32_t>(sym.value), sym.size});
+            mdebug_functions.push_back({ss_strs[orig_sym.iss], sym_section, static_cast<uint32_t>(orig_sym.value), orig_sym.size});
         }
     }
 
