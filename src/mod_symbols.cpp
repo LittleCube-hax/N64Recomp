@@ -77,6 +77,8 @@ struct ReplacementV1 {
     uint32_t original_section_vrom;
     uint32_t original_vram;
     uint32_t flags; // force
+    uint32_t name_start;
+    uint32_t name_size;
 };
 
 struct ExportV1 {
@@ -88,6 +90,8 @@ struct ExportV1 {
 struct CallbackV1 {
     uint32_t dependency_event_index;
     uint32_t function_index;
+    uint32_t name_start;
+    uint32_t name_size;
 };
 
 struct EventV1 {
@@ -100,6 +104,8 @@ struct HookV1 {
     uint32_t original_section_vrom;
     uint32_t original_vram;
     uint32_t flags; // end
+    uint32_t name_start;
+    uint32_t name_size;
 };
 
 template <typename T>
@@ -551,6 +557,7 @@ std::vector<uint8_t> N64Recomp::symbols_to_bin_v1(const N64Recomp::Context& cont
     size_t num_imported_funcs = context.import_symbols.size();
     size_t num_dependency_events = context.dependency_events.size();
 
+    size_t num_replacements = context.replacements.size();
     size_t num_exported_funcs = context.exported_funcs.size();
     size_t num_events = context.event_symbols.size();
     size_t num_callbacks = context.callbacks.size();
@@ -616,7 +623,7 @@ std::vector<uint8_t> N64Recomp::symbols_to_bin_v1(const N64Recomp::Context& cont
         dependency_event_name_positions[dependency_event_index] = static_cast<uint32_t>(ret.size() - strings_start);
         vec_put(ret, dependency_event.event_name);
     }
-    
+
     // Track the start of every exported function's name in the string data.
     std::vector<uint32_t> exported_func_name_positions{};
     exported_func_name_positions.resize(num_exported_funcs);
@@ -626,6 +633,17 @@ std::vector<uint8_t> N64Recomp::symbols_to_bin_v1(const N64Recomp::Context& cont
 
         exported_func_name_positions[export_index] = static_cast<uint32_t>(ret.size() - strings_start);
         vec_put(ret, exported_func.name);
+    }
+
+    // Track the start of every replaced function's name in the string data.
+    std::vector<uint32_t> replaced_func_name_positions{};
+    replaced_func_name_positions.resize(num_replacements);
+    for (size_t replacement_index = 0; replacement_index < num_replacements; replacement_index++) {
+        size_t function_index = context.replacements[replacement_index].func_index;
+        const Function& replaced_func = context.functions[function_index];
+
+        replaced_func_name_positions[replacement_index] = static_cast<uint32_t>(ret.size() - strings_start);
+        vec_put(ret, replaced_func.name);
     }
 
     // Track the start of every provided event's name in the string data.

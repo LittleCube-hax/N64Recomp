@@ -749,12 +749,12 @@ N64Recomp::Context build_mod_context(const N64Recomp::Context& input_context, bo
                     );
                 }
 
-                std::string name_out;
+                std::string name_out = cur_func.name;
+
+                fprintf(stderr, "name: %s, index: %zu\n", cur_func.name.c_str(), output_func_index);
 
                 if (export_section) {
                     ret.exported_funcs.push_back(output_func_index);
-                    // Names are required for exported funcs, so copy the input function's name if we're in the export section.
-                    name_out = cur_func.name;
                 }
 
                 if (callback_section) {

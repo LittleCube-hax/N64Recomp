@@ -25,8 +25,8 @@ static std::vector<uint8_t> read_file(const std::filesystem::path& path, bool& f
 }
 
 int main(int argc, const char** argv) {
-    if (argc != 5) {
-        printf("Usage: %s [mod symbol file] [mod binary file] [recomp symbols file] [output C file]\n", argv[0]);
+    if (argc < 5) {
+        printf("Usage: %s [mod symbol file] [mod binary file] [recomp symbols file] [output C file] (trace-mode)\n", argv[0]);
         return EXIT_SUCCESS;
     }
     bool found;
@@ -69,6 +69,10 @@ int main(int argc, const char** argv) {
     if (error != N64Recomp::ModSymbolsError::Good) {
         fprintf(stderr, "Error parsing mod symbols: %d\n", (int)error);
         return EXIT_FAILURE;
+    }
+
+    if (argc > 5) {
+        mod_context.trace_mode = true;
     }
 
     mod_context.import_reference_context(reference_context);
@@ -127,7 +131,13 @@ int main(int argc, const char** argv) {
     RabbitizerConfig_Cfg.pseudos.pseudoNot = false;
     RabbitizerConfig_Cfg.pseudos.pseudoBal = false;
 
-    output_file << "#include \"mod_recomp.h\"\n\n";
+    output_file << "#include \"mod_recomp.h\"\n";
+
+    if (mod_context.trace_mode) {
+        output_file << "#include \"trace.h\"\n";
+    }
+
+    output_file << "\n";
 
     // Write the API version.
     output_file << "RECOMP_EXPORT uint32_t recomp_api_version = 1;\n\n";
