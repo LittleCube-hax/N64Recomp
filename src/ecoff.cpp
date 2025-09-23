@@ -7,11 +7,13 @@
 
 #define MDEBUG_INTS_SIZE 23
 
-#define BE_TO_LE_8(x, off) (x[off++])
 #define BE_TO_LE_16(x, off) ((x[off++] << 8) | x[off++])
 #define BE_TO_LE_32(x, off) ((((uint8_t) (x[off++])) << 24) | (((uint8_t) (x[off++])) << 16) | (((uint8_t) (x[off++])) << 8) | ((uint8_t) (x[off++])))
 
-struct MDebugHDRR {
+#define SWAP_16(x) x = (((uint8_t) x) << 8) | ((uint8_t) (x >> 8))
+#define SWAP_32(x) x = ((((uint8_t) x) << 24) | (((uint8_t) (x >> 8)) << 16) | (((uint8_t) (x >> 16)) << 8) | ((uint8_t) (x >> 24)))
+
+struct EcoffHDRR {
     uint16_t magic;
     uint16_t vstamp;
     union {
@@ -45,32 +47,35 @@ struct MDebugHDRR {
 };
 
 enum EcoffSt {
-    ST_NIL = 0,
-    ST_GLOBAL = 1,
     ST_STATIC = 2,
     ST_PROC = 6,
     ST_END = 8,
+    ST_FILE = 11,
     ST_STATICPROC = 14
 };
 
 enum EcoffSc {
-    SC_NIL = 0,
-    SC_TEXT = 1,
-    SC_DATA = 2,
-    SC_ABS = 5
 };
 
-struct MDebugSYMR {
+struct EcoffSYMR {
     int32_t iss;
     int32_t value;
-    EcoffSt st; // 6 bits
-    EcoffSc sc; // 5 bits
-    int8_t reserved; // 1 bit
-    int32_t index; // 20 bits
-    uint32_t size; // custom for recompiler
+    uint32_t type_index_chunk;
+
+    EcoffSt get_st() const {
+        return (EcoffSt) ((type_index_chunk >> 26) & 0x3F);
+    }
+
+    EcoffSc get_sc() const {
+        return (EcoffSc) ((type_index_chunk >> 21) & 0x1F);
+    }
+
+    int32_t get_index() const {
+        return type_index_chunk & 0xFFFFF;
+    }
 };
 
-void mdebug_parse_header(MDebugHDRR& out_header, const char* mdebug_data, uint64_t mdebug_file_offset) {
+void mdebug_parse_header(EcoffHDRR& out_header, const char* mdebug_data, uint64_t mdebug_file_offset) {
     size_t data_offset = 0;
 
     out_header.magic = BE_TO_LE_16(mdebug_data, data_offset);
@@ -78,76 +83,79 @@ void mdebug_parse_header(MDebugHDRR& out_header, const char* mdebug_data, uint64
 
     for (int i = 0; i < MDEBUG_INTS_SIZE; ++i) {
         out_header.hdrr_ints[i] = BE_TO_LE_32(mdebug_data, data_offset);
-    }
-}
-
-void mdebug_parse_ss_strs(std::unordered_map<int32_t, std::string>& out_ss_strs, const MDebugHDRR& header, const char* mdebug_data, uint64_t mdebug_file_offset) {
-    size_t str_offset = 0;
-
-    for (int i = 0; str_offset < header.issMax; ++i) {
-        int32_t curr_iss = str_offset;
-        out_ss_strs[curr_iss] = "";
-        char c = mdebug_data[header.cbSsOffset - mdebug_file_offset + str_offset];
-        while (c != 0) {
-            out_ss_strs[curr_iss] += c;
-            str_offset += 1;
-            c = mdebug_data[header.cbSsOffset - mdebug_file_offset + str_offset];
+        if (i > 0 && (i & 1) == 0) {
+            out_header.hdrr_ints[i] -= mdebug_file_offset;
         }
-        str_offset += 1;
     }
 }
 
-void mdebug_parse_sym(MDebugSYMR& out_sym, N64Recomp::Context& context, const char* mdebug_data, uint64_t& offset) {
-    out_sym.iss = BE_TO_LE_32(mdebug_data, offset);
-    out_sym.value = BE_TO_LE_32(mdebug_data, offset);
-    uint32_t sym_chunk = BE_TO_LE_32(mdebug_data, offset);
-    out_sym.st = (EcoffSt) ((sym_chunk >> 26) & 0x3F);
-    out_sym.sc = (EcoffSc) ((sym_chunk >> 21) & 0x1F);
-    out_sym.index = sym_chunk & 0xFFFFF;
+void mdebug_swap_header(EcoffHDRR& out_header) {
+    SWAP_16(out_header.magic);
+    SWAP_16(out_header.vstamp);
+
+    for (int i = 0; i < MDEBUG_INTS_SIZE; ++i) {
+        SWAP_32(out_header.hdrr_ints[i]);
+    }
+}
+
+void mdebug_swap_sym(EcoffSYMR& out_sym) {
+    SWAP_32(out_sym.iss);
+    SWAP_32(out_sym.value);
+    SWAP_32(out_sym.type_index_chunk);
+}
+
+const char* mdebug_get_ss_str(const EcoffHDRR& header, const char* mdebug_data, int32_t iss) {
+    return &mdebug_data[header.cbSsOffset + iss];
+}
+
+void mdebug_push_function(N64Recomp::Context& context, const char* sym_name, int32_t sym_value, uint32_t func_size, std::vector<N64Recomp::MDebugFunction>& mdebug_functions) {
+    std::string sym_section = "";
+
+    printf("found symbol %s\n", sym_name);
+    fflush(stdout);
+
+    for (auto section : context.sections) {
+        if (!section.executable) {
+            continue;
+        }
+
+        if (sym_value >= section.ram_addr && sym_value < section.ram_addr + section.size) {
+            sym_section = section.name;
+            break;
+        }
+    }
+
+    if (sym_section == "") {
+        fmt::print(stderr, "[Warn] Section not found for mdebug symbol {}\n", sym_name);
+    }
+
+    mdebug_functions.push_back({sym_name, sym_section, static_cast<uint32_t>(sym_value), func_size});
 }
 
 bool N64Recomp::Context::from_mdebug_section(N64Recomp::Context& context, const char* mdebug_data, uint64_t mdebug_file_offset, std::vector<N64Recomp::MDebugFunction>& mdebug_functions) {
-    MDebugHDRR header;
+    EcoffHDRR header;
     mdebug_parse_header(header, mdebug_data, mdebug_file_offset);
 
-    std::unordered_map<int32_t, std::string> ss_strs;
-    mdebug_parse_ss_strs(ss_strs, header, mdebug_data, mdebug_file_offset);
+    std::unordered_map<int32_t, EcoffSYMR*> iss_to_sym;
+    std::unordered_map<int32_t, uint32_t> iss_to_func_size;
 
-    size_t sym_offset = header.cbSymOffset - mdebug_file_offset;
+    std::vector<EcoffSYMR> all_syms;
+    const EcoffSYMR* syms_ptr = reinterpret_cast<const EcoffSYMR*>(&mdebug_data[header.cbSymOffset]);
 
-    std::unordered_map<std::string, MDebugSYMR> syms;
+    // Param 2 is the pointer to the syms + the count of symbols,
+    // not the count of symbol bytes:
+    all_syms.assign(syms_ptr, syms_ptr + header.isymMax);
 
-    for (int i = 0; i < header.isymMax; ++i) {
-        MDebugSYMR sym{};
-        mdebug_parse_sym(sym, context, mdebug_data, sym_offset);
+    for (EcoffSYMR& sym : all_syms) {
+        mdebug_swap_sym(sym);
 
-        if (sym.st == ST_STATICPROC) {
-            syms[ss_strs[sym.iss]] = sym;
-        } else if (sym.st == ST_END) {
-            if (syms.find(ss_strs[sym.iss]) == syms.end()) {
-                continue;
-            }
-            MDebugSYMR orig_sym = syms[ss_strs[sym.iss]];
-            orig_sym.size = sym.value;
-            std::string sym_section = "";
-
-            for (auto section : context.sections) {
-                if (!section.executable) {
-                    continue;
-                }
-
-                if (orig_sym.value >= section.ram_addr && orig_sym.value < section.ram_addr + section.size) {
-                    sym_section = section.name;
-                    break;
-                }
-            }
-
-            if (sym_section == "") {
-                fmt::print("Section not found for mdebug symbol %s\n", ss_strs[sym.iss]);
-                return false;
-            }
-
-            mdebug_functions.push_back({ss_strs[orig_sym.iss], sym_section, static_cast<uint32_t>(orig_sym.value), orig_sym.size});
+        if (sym.get_st() == ST_STATICPROC) {
+            iss_to_sym[sym.iss] = &sym;
+            printf("add sym %s with iss %d\n", mdebug_get_ss_str(header, mdebug_data, sym.iss), sym.iss);
+            fflush(stdout);
+        } else if (sym.get_st() == ST_END && iss_to_sym.find(sym.iss) != iss_to_sym.end()) {
+            const EcoffSYMR* orig_sym = iss_to_sym[sym.iss];
+            mdebug_push_function(context, mdebug_get_ss_str(header, mdebug_data, orig_sym->iss), orig_sym->value, sym.value, mdebug_functions);
         }
     }
 

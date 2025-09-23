@@ -411,6 +411,8 @@ ELFIO::section* read_sections(N64Recomp::Context& context, const N64Recomp::ElfP
         if (!N64Recomp::Context::from_mdebug_section(context, mdebug_data, mdebug_offset, mdebug_functions)) {
             return nullptr;
         }
+    } else {
+        fmt::print("no .mdebug section, continuing anyway\n");
     }
 
     if (symtab_section == nullptr) {
